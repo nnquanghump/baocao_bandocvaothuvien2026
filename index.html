@@ -180,7 +180,7 @@ async function loadRegion(region){
   for(let i = 1; i < rows.length; i++){
     const row = rows[i];
     const time = parseVNDateTime(row[idxTime]);
-    const ma = (row[idxMa] || '').trim();
+    const ma = normalizeReaderId(row[idxMa]);
     if(!time || !ma) continue;
     out.push({ region: region.name, time, ma });
   }
@@ -197,7 +197,7 @@ async function loadDirectory(){
   const map = {};
   for(let i = 1; i < rows.length; i++){
     const row = rows[i];
-    const ma = (row[idxMa] || '').trim();
+    const ma = normalizeReaderId(row[idxMa]);
     if(!ma) continue;
     map[ma] = { hoTen: idxTen > -1 ? row[idxTen] : '', nganh: idxNganh > -1 ? row[idxNganh] : '' };
   }
