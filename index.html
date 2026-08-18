@@ -16,11 +16,10 @@
     --brass:#B8863C;
     --brass-soft:#E7D6AE;
     --red-stamp:#9A3B32;
-    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-display: Georgia, 'Noto Serif', 'Times New Roman', serif;
     --font-body: 'Inter', -apple-system, sans-serif;
     --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
   }
-  @font-face{font-family:'Fraunces';src:local('Georgia');}
   *{box-sizing:border-box;}
   body{
     margin:0;
@@ -151,8 +150,15 @@ const state = { region: {}, overall: [], months: [], selectedMonth: null, charts
 async function fetchCsv(url){
   const res = await fetch(url, { cache: 'no-store' });
   if(!res.ok) throw new Error('HTTP ' + res.status);
-  const text = await res.text();
-  const parsed = Papa.parse(text, { header:true, dynamicTyping:true, skipEmptyLines:true });
+  let text = await res.text();
+  text = text.replace(/^\uFEFF/, ''); // Google Sheets CSV thường chèn BOM ở đầu file, gây lệch tên cột đầu tiên
+  const parsed = Papa.parse(text, {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+    transformHeader: h => h.replace(/^\uFEFF/, '').trim(),
+    transform: v => (typeof v === 'string' ? v.trim() : v)
+  });
   return parsed.data;
 }
 
@@ -178,11 +184,17 @@ async function loadAll(){
   }
 
   const monthSet = new Set();
-  REGION_NAMES.forEach(name => state.region[name].forEach(r => monthSet.add(monthKey(r))));
+  REGION_NAMES.forEach(name => state.region[name].forEach(r => {
+    if(r['Năm'] && r['Tháng']) monthSet.add(monthKey(r));
+  }));
   state.months = Array.from(monthSet).sort();
   state.selectedMonth = state.months[state.months.length - 1] || null;
 
-  document.getElementById('statusLine').textContent = 'Cập nhật: ' + new Date().toLocaleString('vi-VN');
+  if(state.months.length === 0){
+    document.getElementById('statusLine').textContent = 'Đã kết nối CSV nhưng chưa đọc được dòng dữ liệu nào — kiểm tra lại sheet báo cáo đã có dữ liệu chưa.';
+  } else {
+    document.getElementById('statusLine').textContent = 'Cập nhật: ' + new Date().toLocaleString('vi-VN');
+  }
   renderMonthRail();
   renderAll();
 }
