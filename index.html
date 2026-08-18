@@ -160,6 +160,15 @@ function parseVNDateTime(raw){
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
+  function normalizeReaderId(value){
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\u00A0/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
+}
 async function loadRegion(region){
   const rows = await fetchCsvRows(gvizCsvUrl(region.spreadsheetId, region.sheetName));
   if(!rows.length) return [];
