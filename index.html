@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Báo cáo lượt độc giả</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --ink:#1B2A4A;
+    --ink-soft:#3B4A6B;
+    --parchment:#F4EFE3;
+    --parchment-line:#DCD3BC;
+    --forest:#2F4A3D;
+    --brass:#B8863C;
+    --brass-soft:#E7D6AE;
+    --red-stamp:#9A3B32;
+    --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --font-body: 'Inter', -apple-system, sans-serif;
+    --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
+  }
+  @font-face{font-family:'Fraunces';src:local('Georgia');}
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 15% 10%, rgba(255,255,255,0.04), transparent 40%),
+      var(--ink);
+    color:var(--parchment);
+    font-family:var(--font-body);
+    min-height:100vh;
+    padding:32px 20px 80px;
+  }
+  .wrap{max-width:1100px;margin:0 auto;}
+
+  header.top{
+    display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between;
+    gap:16px; border-bottom:2px solid var(--ink-soft); padding-bottom:20px; margin-bottom:28px;
+  }
+  header.top h1{
+    font-family:var(--font-display); font-weight:600; font-size:2.1rem; margin:0;
+    letter-spacing:0.2px;
+  }
+  header.top .eyebrow{
+    font-family:var(--font-mono); font-size:0.72rem; letter-spacing:0.14em;
+    text-transform:uppercase; color:var(--brass-soft); margin-bottom:6px;
+  }
+  header.top .status{font-family:var(--font-mono); font-size:0.78rem; color:var(--ink-soft-2, #9FB0CC);}
+
+  /* Month selector styled like library due-date card slips */
+  .month-rail{
+    display:flex; gap:10px; overflow-x:auto; padding-bottom:6px; margin-bottom:28px;
+  }
+  .month-chip{
+    flex:0 0 auto; font-family:var(--font-mono); font-size:0.82rem;
+    background:var(--parchment); color:var(--ink); border:1px solid var(--parchment-line);
+    border-radius:3px; padding:10px 14px; cursor:pointer; position:relative;
+    box-shadow:0 2px 0 rgba(0,0,0,0.15);
+    transition:transform .15s ease;
+  }
+  .month-chip::before{
+    content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--brass);
+    opacity:0; transition:opacity .15s ease;
+  }
+  .month-chip.active{background:var(--brass-soft); transform:translateY(-2px);}
+  .month-chip.active::before{opacity:1;}
+  .month-chip:hover{transform:translateY(-2px);}
+
+  section.overall{
+    background:var(--parchment); color:var(--ink); border-radius:6px; padding:22px 24px;
+    margin-bottom:28px; box-shadow:0 6px 18px rgba(0,0,0,0.25);
+  }
+  section.overall h2{font-family:var(--font-display); margin:0 0 4px; font-size:1.3rem;}
+  .overall-sub{font-family:var(--font-mono); font-size:0.78rem; color:var(--ink-soft); margin-bottom:16px;}
+  .overall-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:18px;}
+  .stat-card{border:1px solid var(--parchment-line); border-radius:4px; padding:14px 16px; background:#fff;}
+  .stat-card .num{font-family:var(--font-mono); font-size:1.6rem; font-weight:700; color:var(--forest);}
+  .stat-card .lbl{font-size:0.78rem; color:var(--ink-soft); margin-top:2px;}
+  .chart-box{background:#fff; border:1px solid var(--parchment-line); border-radius:4px; padding:16px; height:280px;}
+
+  .region-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:20px;}
+  .region-card{
+    background:var(--parchment); color:var(--ink); border-radius:6px; padding:20px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.25); position:relative; overflow:hidden;
+  }
+  .region-card::after{
+    content:'ĐÃ GHI SỔ'; position:absolute; top:14px; right:-30px; transform:rotate(35deg);
+    font-family:var(--font-mono); font-size:0.6rem; letter-spacing:0.12em; color:var(--red-stamp);
+    border:1px solid var(--red-stamp); padding:2px 34px; opacity:0.35;
+  }
+  .region-card h3{font-family:var(--font-display); margin:0 0 12px; font-size:1.1rem;}
+  .region-stats{display:flex; gap:18px; flex-wrap:wrap; margin-bottom:14px;}
+  .region-stats div{min-width:90px;}
+  .region-stats .num{font-family:var(--font-mono); font-weight:700; font-size:1.3rem; color:var(--forest);}
+  .region-stats .lbl{font-size:0.72rem; color:var(--ink-soft);}
+  .top-readers{font-size:0.78rem; color:var(--ink-soft); border-top:1px dashed var(--parchment-line); padding-top:10px; line-height:1.5;}
+  .top-readers b{color:var(--ink); font-family:var(--font-mono); font-weight:600;}
+  .mini-chart{height:120px; margin-top:12px;}
+
+  .setup{
+    background:rgba(255,255,255,0.06); border:1px solid var(--ink-soft); border-radius:6px;
+    padding:20px 22px; font-family:var(--font-mono); font-size:0.82rem; line-height:1.7; color:var(--brass-soft);
+  }
+  .setup code{background:rgba(0,0,0,0.25); padding:1px 5px; border-radius:3px;}
+  .empty-note{font-family:var(--font-mono); font-size:0.85rem; color:#9FB0CC;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <div class="eyebrow">Trung tâm học liệu — Hệ thống báo cáo</div>
+      <h1>Lượt độc giả theo tháng</h1>
+    </div>
+    <div class="status" id="statusLine">Đang tải dữ liệu…</div>
+  </header>
+
+  <div id="monthRail" class="month-rail"></div>
+
+  <section class="overall">
+    <h2>Tổng quát</h2>
+    <div class="overall-sub" id="overallSub">—</div>
+    <div class="overall-grid" id="overallStats"></div>
+    <div class="chart-box"><canvas id="overallChart"></canvas></div>
+  </section>
+
+  <div class="region-grid" id="regionGrid"></div>
+
+  <div class="setup" id="setupBox" style="display:none; margin-top:28px;"></div>
+
+</div>
+
+<script>
+/* ============================================================
+   CẤU HÌNH: dán URL CSV đã "Publish to web" của từng sheet báo cáo
+   (File Tổng Hợp > Tệp > Chia sẻ > Xuất bản lên web > chọn từng
+   sheet BaoCao_... > định dạng CSV > Xuất bản, rồi copy link vào đây)
+   ============================================================ */
+const CSV_URLS = {
+  'Tầng 1': 'DÁN_URL_CSV_TANG_1',
+  'Tầng 2': 'DÁN_URL_CSV_TANG_2',
+  'Tầng 3': 'DÁN_URL_CSV_TANG_3',
+  'Tổng quát': 'DÁN_URL_CSV_TONG_QUAT'
+};
+
+const REGION_NAMES = ['Tầng 1', 'Tầng 2', 'Tầng 3'];
+const state = { region: {}, overall: [], months: [], selectedMonth: null, charts: {} };
+
+async function fetchCsv(url){
+  const res = await fetch(url, { cache: 'no-store' });
+  if(!res.ok) throw new Error('HTTP ' + res.status);
+  const text = await res.text();
+  const parsed = Papa.parse(text, { header:true, dynamicTyping:true, skipEmptyLines:true });
+  return parsed.data;
+}
+
+function monthKey(row){ return row['Năm'] + '-' + String(row['Tháng']).padStart(2,'0'); }
+function monthLabel(key){
+  const [y,m] = key.split('-');
+  return 'Th' + parseInt(m,10) + '/' + y;
+}
+
+async function loadAll(){
+  const isPlaceholder = Object.values(CSV_URLS).some(u => u.startsWith('DÁN_URL'));
+  if(isPlaceholder){ showSetupNeeded(); return; }
+
+  try{
+    for(const name of REGION_NAMES){
+      state.region[name] = await fetchCsv(CSV_URLS[name]);
+    }
+    state.overall = await fetchCsv(CSV_URLS['Tổng quát']);
+  }catch(err){
+    document.getElementById('statusLine').textContent = 'Lỗi tải dữ liệu: ' + err.message;
+    showSetupNeeded();
+    return;
+  }
+
+  const monthSet = new Set();
+  REGION_NAMES.forEach(name => state.region[name].forEach(r => monthSet.add(monthKey(r))));
+  state.months = Array.from(monthSet).sort();
+  state.selectedMonth = state.months[state.months.length - 1] || null;
+
+  document.getElementById('statusLine').textContent = 'Cập nhật: ' + new Date().toLocaleString('vi-VN');
+  renderMonthRail();
+  renderAll();
+}
+
+function showSetupNeeded(){
+  const box = document.getElementById('setupBox');
+  box.style.display = 'block';
+  box.innerHTML = 'Chưa cấu hình nguồn dữ liệu.<br><br>' +
+    '1. Mở File Tổng Hợp (nơi chứa script Apps Script).<br>' +
+    '2. Với từng sheet <code>BaoCao_Tầng 1</code>, <code>BaoCao_Tầng 2</code>, <code>BaoCao_Tầng 3</code>, <code>BaoCao_TongQuat</code>:<br>' +
+    '&nbsp;&nbsp;Tệp → Chia sẻ → Xuất bản lên web → chọn đúng sheet → định dạng <b>CSV</b> → Xuất bản.<br>' +
+    '3. Copy từng URL CSV vào biến <code>CSV_URLS</code> ở đầu file dashboard.html này.<br>' +
+    '4. Lưu và mở lại trang.';
+}
+
+function renderMonthRail(){
+  const rail = document.getElementById('monthRail');
+  rail.innerHTML = '';
+  state.months.forEach(m => {
+    const chip = document.createElement('div');
+    chip.className = 'month-chip' + (m === state.selectedMonth ? ' active' : '');
+    chip.textContent = monthLabel(m);
+    chip.onclick = () => { state.selectedMonth = m; renderMonthRail(); renderAll(); };
+    rail.appendChild(chip);
+  });
+}
+
+function destroyChart(id){
+  if(state.charts[id]){ state.charts[id].destroy(); delete state.charts[id]; }
+}
+
+function renderAll(){
+  renderOverall();
+  renderRegions();
+}
+
+function renderOverall(){
+  const [y,m] = state.selectedMonth ? state.selectedMonth.split('-') : [null,null];
+  const rows = state.overall.filter(r => r['Năm'] == y && r['Tháng'] == parseInt(m,10));
+  const totalRow = rows.find(r => String(r['Khu vực']).includes('TẤT CẢ'));
+  const regionRows = rows.filter(r => !String(r['Khu vực']).includes('TẤT CẢ'));
+
+  document.getElementById('overallSub').textContent = state.selectedMonth ? monthLabel(state.selectedMonth) + ' — 3 khu vực' : 'Chưa có dữ liệu';
+
+  const statsEl = document.getElementById('overallStats');
+  statsEl.innerHTML = '';
+  const cards = [
+    { num: totalRow ? totalRow['Tổng lượt'] : '—', lbl: 'Tổng lượt vào (toàn hệ thống)' },
+    { num: totalRow ? totalRow['Độc giả duy nhất'] : '—', lbl: 'Độc giả duy nhất (đã loại trùng)' },
+    { num: regionRows.length, lbl: 'Số khu vực có dữ liệu' }
+  ];
+  cards.forEach(c => {
+    const div = document.createElement('div');
+    div.className = 'stat-card';
+    div.innerHTML = '<div class="num">' + c.num + '</div><div class="lbl">' + c.lbl + '</div>';
+    statsEl.appendChild(div);
+  });
+
+  destroyChart('overallChart');
+  const ctx = document.getElementById('overallChart');
+  // Xu hướng tổng lượt qua các tháng, theo từng khu vực
+  const labels = state.months.map(monthLabel);
+  const datasets = REGION_NAMES.map((name, i) => {
+    const colors = ['#2F4A3D', '#B8863C', '#1B2A4A'];
+    const data = state.months.map(mk => {
+      const [yy,mm] = mk.split('-');
+      const row = state.overall.find(r => r['Năm']==yy && r['Tháng']==parseInt(mm,10) && r['Khu vực']===name);
+      return row ? row['Tổng lượt'] : null;
+    });
+    return { label:name, data, borderColor:colors[i], backgroundColor:colors[i], tension:0.25, spanGaps:true };
+  });
+
+  state.charts.overallChart = new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{ labels:{ font:{ family:'Inter' } } } },
+      scales:{ x:{ grid:{color:'#eee'} }, y:{ beginAtZero:true, grid:{color:'#eee'} } }
+    }
+  });
+}
+
+function renderRegions(){
+  const grid = document.getElementById('regionGrid');
+  grid.innerHTML = '';
+  const [y,m] = state.selectedMonth ? state.selectedMonth.split('-') : [null,null];
+
+  REGION_NAMES.forEach((name, i) => {
+    const rows = state.region[name] || [];
+    const row = rows.find(r => r['Năm'] == y && r['Tháng'] == parseInt(m,10));
+
+    const card = document.createElement('div');
+    card.className = 'region-card';
+    card.innerHTML = `
+      <h3>${name}</h3>
+      <div class="region-stats">
+        <div><div class="num">${row ? row['Tổng lượt'] : '—'}</div><div class="lbl">Tổng lượt</div></div>
+        <div><div class="num">${row ? row['Độc giả duy nhất'] : '—'}</div><div class="lbl">Độc giả duy nhất</div></div>
+        <div><div class="num">${row && row['Ngày đông nhất'] ? row['Ngày đông nhất'] : '—'}</div><div class="lbl">Ngày đông nhất</div></div>
+      </div>
+      <div class="mini-chart"><canvas id="chart_${i}"></canvas></div>
+      <div class="top-readers"><b>Top độc giả:</b> ${row && row['Top độc giả'] ? row['Top độc giả'] : 'Không có dữ liệu'}</div>
+    `;
+    grid.appendChild(card);
+
+    destroyChart('chart_' + i);
+    const ctx = card.querySelector('#chart_' + i);
+    const colors = ['#2F4A3D', '#B8863C', '#1B2A4A'];
+    const data = state.months.map(mk => {
+      const [yy,mm] = mk.split('-');
+      const r = rows.find(rr => rr['Năm']==yy && rr['Tháng']==parseInt(mm,10));
+      return r ? r['Tổng lượt'] : null;
+    });
+    state.charts['chart_' + i] = new Chart(ctx, {
+      type:'bar',
+      data:{ labels: state.months.map(monthLabel), datasets:[{ data, backgroundColor: colors[i], borderRadius:3 }] },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ display:false } },
+        scales:{ x:{ grid:{display:false} }, y:{ beginAtZero:true, grid:{color:'#eee'} } }
+      }
+    });
+  });
+}
+
+loadAll();
+</script>
+</body>
+</html>
