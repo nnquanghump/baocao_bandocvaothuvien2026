@@ -87,6 +87,17 @@
 
   .note-box{font-size:0.82rem; color:var(--text-faint); padding:14px 4px;}
   .setup{background:#FFF7ED; border:1px solid #F3D9B5; color:#92400E; border-radius:var(--r-md); padding:18px 20px; font-family:var(--font-mono); font-size:0.82rem; line-height:1.7;}
+
+  /* ============================================================
+     BỔ SUNG — BÁO CÁO ĐỐI TƯỢNG / NGÀNH / NĂM HỌC
+     ============================================================ */
+  .analytics-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; margin-bottom:16px;}
+  .analytics-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:22px 24px;}
+  .analytics-card h2{font-family:var(--font-display); font-size:1.05rem; font-weight:600; margin:0 0 2px;}
+  .analytics-sub{font-size:0.8rem; color:var(--text-soft); margin-bottom:16px;}
+  .analytics-chart-box{height:300px;}
+  .study-chart-box{height:360px;}
+
 </style>
 </head>
 <body>
@@ -116,6 +127,30 @@
   <div class="leaderboard">
     <h2>Top 5 độc giả — toàn hệ thống (tháng gần nhất)</h2>
     <div class="lb-grid" id="top5Overall"></div>
+  </div>
+
+
+  <!-- ==========================================================
+       BỔ SUNG — BÁO CÁO ĐỘC GIẢ
+       ========================================================== -->
+  <div class="analytics-grid">
+    <div class="analytics-card">
+      <h2>Đối tượng vào thư viện</h2>
+      <div class="analytics-sub" id="borrowerCategorySub">Lượt vào trong tháng gần nhất</div>
+      <div class="analytics-chart-box"><canvas id="borrowerCategoryChart"></canvas></div>
+    </div>
+
+    <div class="analytics-card">
+      <h2>Sinh viên theo ngành</h2>
+      <div class="analytics-sub" id="studentMajorSub">Lượt vào của sinh viên trong tháng gần nhất</div>
+      <div class="analytics-chart-box"><canvas id="studentMajorChart"></canvas></div>
+    </div>
+  </div>
+
+  <div class="trend-card">
+    <h2>Năm học vào thư viện theo ngành</h2>
+    <div class="trend-sub" id="studyYearSub">Phân bố lượt vào của sinh viên theo năm học và ngành</div>
+    <div class="study-chart-box"><canvas id="studyYearChart"></canvas></div>
   </div>
 
   <div class="note-box" id="noteBox"></div>
@@ -211,16 +246,369 @@ function readerLabel(ma, directory){
   return ma;
 }
 
+
+/* ============================================================
+   BỔ SUNG — PHÂN TÍCH ĐỘC GIẢ
+   Không thay đổi logic báo cáo cũ.
+   ============================================================ */
+
+const MAJOR_MAP = {
+  Y: 'Y Đa Khoa',
+  RHM: 'Răng Hàm Mặt',
+  YHCT: 'Y Học Cổ Truyền',
+  YHDP: 'Y Học Dự Phòng',
+  YTCC: 'Y Tế Công Cộng',
+  D: 'Dược',
+  DUOC: 'Dược',
+  XNYH: 'Xét Nghiệm Y Học',
+  HAYH: 'Hình Ảnh Y Học',
+  DD: 'Điều Dưỡng',
+  HS: 'Hộ Sinh',
+  DINHDUONG: 'Dinh Dưỡng'
+};
+
+const ANALYTICS_COLORS = [
+  '#5B5FEF', '#0EA5A5', '#E29A3C', '#22B573',
+  '#8B5CF6', '#EC4899', '#3B82F6', '#64748B'
+];
+
+function normalizeAnalyticsText(value){
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/Đ/g, 'D')
+    .replace(/đ/g, 'd')
+    .trim();
+}
+
+function normalizeAddress(value){
+  return normalizeAnalyticsText(value)
+    .toUpperCase()
+    .replace(/\s+/g, '');
+}
+
+function classifyBorrowerCategory(value){
+  const s = normalizeAnalyticsText(value).toLowerCase();
+
+  if(s.includes('sinh vien')) return 'Sinh viên';
+  if(s.includes('hoc vien')) return 'Học viên';
+  if(s.includes('can bo')) return 'Cán bộ';
+
+  return 'Khác/Chưa phân loại';
+}
+
+function extractMajorCode(address){
+  const s = normalizeAddress(address);
+  if(!s) return '';
+
+  // Trường hợp tên ngành viết bằng chữ.
+  // normalizeAddress đã bỏ dấu + khoảng trắng:
+  // "Dinh Duong" / "Dinh Dưỡng" -> DINHDUONG
+  if(s.includes('DINHDUONG')) return 'DINHDUONG';
+
+  // Hỗ trợ dạng có dấu chấm:
+  // CH.Y.23, BSNT.RHM.24...
+  const parts = s.split('.').filter(Boolean);
+
+  // Ưu tiên mã ngành đầy đủ đã biết.
+  // Sort theo độ dài để DD/DUOC không bị mã D bắt nhầm.
+  const knownCodes = Object.keys(MAJOR_MAP)
+    .sort((a,b) => b.length - a.length);
+
+  for(const part of parts){
+    if(MAJOR_MAP[part]) return part;
+
+    // Trích chuỗi chữ trước số đầu tiên trong từng phần.
+    const match = part.match(/^([A-Z]+)(?=\d)/);
+    if(match){
+      const prefix = match[1];
+      if(MAJOR_MAP[prefix]) return prefix;
+    }
+  }
+
+  // Dạng thông thường:
+  // Y23, YHDP25, RHM23B, DD24A, D23...
+  const wholeMatch = s.match(/^([A-Z]+)(?=\d)/);
+  if(wholeMatch){
+    const prefix = wholeMatch[1];
+    if(MAJOR_MAP[prefix]) return prefix;
+  }
+
+  // Hỗ trợ DUOC23... nếu dữ liệu có dạng chữ không dấu.
+  for(const code of knownCodes){
+    if(s.startsWith(code)){
+      const rest = s.slice(code.length);
+      if(rest === '' || /^\d/.test(rest) || rest.startsWith('.')){
+        return code;
+      }
+    }
+  }
+
+  return '';
+}
+function detectMajor(address){
+  const code = extractMajorCode(address);
+  return MAJOR_MAP[code] || 'Khác/Chưa phân loại';
+}
+
+function extractStartYear(value){
+  const s = String(value ?? '').trim();
+  if(!s) return null;
+
+  const fourDigit = s.match(/(?:19|20)\d{2}/);
+  if(fourDigit) return Number(fourDigit[0]);
+
+  // Nếu dữ liệu chỉ có 2 số như 23 thì hiểu là 2023.
+  if(/^\d{2}$/.test(s)) return 2000 + Number(s);
+
+  return null;
+}
+
+function calculateStudyYear(startYear){
+  if(!startYear) return null;
+
+  // Theo công thức đã chốt:
+  // Năm hiện tại - năm bắt đầu khóa học (User Text 1) + 1
+  const studyYear = new Date().getFullYear() - startYear + 1;
+
+  // Chặn dữ liệu bất thường để không làm sai biểu đồ.
+  return studyYear >= 1 && studyYear <= 12 ? studyYear : null;
+}
+
+async function loadReaderAnalyticsDirectory(){
+  if(!READER_DIRECTORY) return {};
+
+  const rows = await fetchCsvRows(
+    gvizCsvUrl(READER_DIRECTORY.spreadsheetId, READER_DIRECTORY.sheetName)
+  );
+
+  if(!rows.length) return {};
+
+  const header = rows[0].map(chuanHoa);
+
+  const idxMa = header.findIndex(h =>
+    h.includes('ma vach') ||
+    h.includes('ma doc gia') ||
+    h.includes('ma doc')
+  );
+
+  const idxBorrowerCategory = header.findIndex(h =>
+    h.includes('borrower loan category')
+  );
+
+  const idxAddress = header.findIndex(h =>
+    h.includes('adress') ||
+    h.includes('address')
+  );
+
+  const idxUserText1 = header.findIndex(h =>
+    h.includes('user text 1') ||
+    h.includes('usertext1')
+  );
+
+  if(idxMa === -1){
+    throw new Error('Không tìm thấy cột mã độc giả trong danh mục.');
+  }
+
+  const map = {};
+
+  for(let i = 1; i < rows.length; i++){
+    const row = rows[i];
+    const ma = normalizeReaderId(row[idxMa]);
+    if(!ma) continue;
+
+    const borrowerRaw = idxBorrowerCategory > -1 ? row[idxBorrowerCategory] : '';
+    const addressRaw = idxAddress > -1 ? row[idxAddress] : '';
+    const userText1Raw = idxUserText1 > -1 ? row[idxUserText1] : '';
+
+    const startYear = extractStartYear(userText1Raw);
+
+    map[ma] = {
+      borrowerCategory: classifyBorrowerCategory(borrowerRaw),
+      address: addressRaw,
+      majorCode: extractMajorCode(addressRaw),
+      major: detectMajor(addressRaw),
+      startYear,
+      studyYear: calculateStudyYear(startYear)
+    };
+  }
+
+  return map;
+}
+
+function countBy(items, keyFn){
+  const out = {};
+  items.forEach(item => {
+    const key = keyFn(item);
+    if(!key) return;
+    out[key] = (out[key] || 0) + 1;
+  });
+  return out;
+}
+
+function renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth){
+  const enriched = latestRows.map(row => ({
+    ...row,
+    analytics: analyticsDirectory[row.ma] || {
+      borrowerCategory: 'Khác/Chưa phân loại',
+      major: 'Khác/Chưa phân loại',
+      studyYear: null
+    }
+  }));
+
+  // ------------------------------------------------------------
+  // 1. ĐỐI TƯỢNG VÀO THƯ VIỆN
+  // ------------------------------------------------------------
+  const borrowerCounts = countBy(enriched, r => r.analytics.borrowerCategory);
+  const borrowerOrder = ['Sinh viên', 'Học viên', 'Cán bộ', 'Khác/Chưa phân loại'];
+  const borrowerLabels = borrowerOrder.filter(k => borrowerCounts[k] > 0);
+
+  document.getElementById('borrowerCategorySub').textContent =
+    `Lượt vào theo đối tượng — ${monthLabelOf(latestMonth)}`;
+
+  new Chart(document.getElementById('borrowerCategoryChart'), {
+    type: 'doughnut',
+    data: {
+      labels: borrowerLabels,
+      datasets: [{
+        data: borrowerLabels.map(k => borrowerCounts[k]),
+        backgroundColor: borrowerLabels.map((_, i) => ANALYTICS_COLORS[i % ANALYTICS_COLORS.length]),
+        borderColor: '#FFFFFF',
+        borderWidth: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { family: 'Inter', size: 11 }, usePointStyle: true, boxWidth: 8 }
+        }
+      }
+    }
+  });
+
+  // ------------------------------------------------------------
+  // 2. SINH VIÊN THEO NGÀNH
+  // ------------------------------------------------------------
+  const studentRows = enriched.filter(r => r.analytics.borrowerCategory === 'Sinh viên');
+  const majorCounts = countBy(studentRows, r => r.analytics.major);
+  const majorEntries = Object.entries(majorCounts).sort((a,b) => b[1] - a[1]);
+
+  document.getElementById('studentMajorSub').textContent =
+    `Lượt vào của sinh viên theo ngành — ${monthLabelOf(latestMonth)}`;
+
+  new Chart(document.getElementById('studentMajorChart'), {
+    type: 'pie',
+    data: {
+      labels: majorEntries.map(([name]) => name),
+      datasets: [{
+        data: majorEntries.map(([, count]) => count),
+        backgroundColor: majorEntries.map((_, i) => ANALYTICS_COLORS[i % ANALYTICS_COLORS.length]),
+        borderColor: '#FFFFFF',
+        borderWidth: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { family: 'Inter', size: 11 }, usePointStyle: true, boxWidth: 8 }
+        }
+      }
+    }
+  });
+
+  // ------------------------------------------------------------
+  // 3. NĂM HỌC × NGÀNH
+  // ------------------------------------------------------------
+  const studyRows = studentRows.filter(r =>
+    Number.isInteger(r.analytics.studyYear) &&
+    r.analytics.major !== 'Khác/Chưa phân loại'
+  );
+
+  const studyYears = Array.from(
+    new Set(studyRows.map(r => r.analytics.studyYear))
+  ).sort((a,b) => a - b);
+
+  const majors = Array.from(
+    new Set(studyRows.map(r => r.analytics.major))
+  );
+
+  const totalsByYear = {};
+  studyRows.forEach(r => {
+    const y = r.analytics.studyYear;
+    totalsByYear[y] = (totalsByYear[y] || 0) + 1;
+  });
+
+  const topStudyYear = Object.entries(totalsByYear)
+    .sort((a,b) => b[1] - a[1])[0];
+
+  document.getElementById('studyYearSub').textContent = topStudyYear
+    ? `Năm ${topStudyYear[0]} có lượt vào cao nhất: ${Number(topStudyYear[1]).toLocaleString('vi-VN')} lượt — ${monthLabelOf(latestMonth)}`
+    : `Chưa đủ dữ liệu User Text 1 để tính năm học — ${monthLabelOf(latestMonth)}`;
+
+  const studyDatasets = majors.map((major, i) => ({
+    label: major,
+    data: studyYears.map(year =>
+      studyRows.filter(r =>
+        r.analytics.studyYear === year &&
+        r.analytics.major === major
+      ).length
+    ),
+    backgroundColor: ANALYTICS_COLORS[i % ANALYTICS_COLORS.length],
+    borderWidth: 0
+  }));
+
+  new Chart(document.getElementById('studyYearChart'), {
+    type: 'bar',
+    data: {
+      labels: studyYears.map(y => `Năm ${y}`),
+      datasets: studyDatasets
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top',
+          align: 'end',
+          labels: { font: { family: 'Inter', size: 11 }, usePointStyle: true, boxWidth: 8 }
+        }
+      },
+      scales: {
+        x: {
+          stacked: true,
+          grid: { display: false },
+          ticks: { font: { family: 'Inter', size: 11 }, color: '#6B7080' }
+        },
+        y: {
+          stacked: true,
+          beginAtZero: true,
+          grid: { color: '#EEF0F5' },
+          ticks: { font: { family: 'JetBrains Mono', size: 10 }, color: '#9CA0B0' }
+        }
+      }
+    }
+  });
+}
+
 async function main(){
   const missing = REGIONS.some(r => !r.spreadsheetId || r.spreadsheetId.startsWith('DÁN_'));
   if(missing){ showSetupNeeded('Chưa điền đủ ID 3 file khu vực trong REGIONS.'); return; }
 
   let allRows = [];
   let directory = {};
+  let analyticsDirectory = {};
   try{
     const results = await Promise.all(REGIONS.map(loadRegion));
     results.forEach(r => allRows = allRows.concat(r));
     directory = await loadDirectory();
+    analyticsDirectory = await loadReaderAnalyticsDirectory();
   }catch(err){
     showSetupNeeded('Lỗi tải dữ liệu: ' + err.message + '. Kiểm tra chế độ chia sẻ file (cần "Bất kỳ ai có đường liên kết — Người xem") và tên tab.');
     return;
@@ -307,6 +695,9 @@ async function main(){
   document.getElementById('top5Overall').innerHTML = top5All.length ? top5All.map(([ma,c], idx) => `
     <div class="lb-item"><span class="lb-rank">${idx+1}</span><span class="lb-name">${readerLabel(ma, directory)}</span><span class="lb-count">${c} lượt</span></div>
   `).join('') : '<div class="lb-item">Không có dữ liệu</div>';
+
+  // BỔ SUNG: dựng 3 báo cáo phân tích mới, không ảnh hưởng báo cáo cũ.
+  renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth);
 
   document.getElementById('noteBox').textContent = READER_DIRECTORY
     ? 'Đã nối danh mục độc giả.'
