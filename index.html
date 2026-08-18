@@ -97,6 +97,17 @@
   .analytics-sub{font-size:0.8rem; color:var(--text-soft); margin-bottom:16px;}
   .analytics-chart-box{height:300px;}
   .study-chart-box{height:360px;}
+  .graduate-list-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:22px 24px; margin-bottom:16px;}
+  .graduate-list-card h2{font-family:var(--font-display); font-size:1.05rem; font-weight:600; margin:0 0 2px;}
+  .graduate-list-sub{font-size:0.8rem; color:var(--text-soft); margin-bottom:16px;}
+  .graduate-table-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--r-md);}
+  .graduate-table{width:100%; border-collapse:collapse; min-width:760px; background:var(--surface);}
+  .graduate-table th{font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-faint); text-align:left; padding:11px 12px; background:var(--surface-2); border-bottom:1px solid var(--border);}
+  .graduate-table td{font-size:0.84rem; padding:11px 12px; border-bottom:1px solid var(--border); vertical-align:middle;}
+  .graduate-table tr:last-child td{border-bottom:none;}
+  .graduate-table .mono{font-family:var(--font-mono);}
+  .graduate-empty{padding:18px; color:var(--text-faint); font-size:0.84rem;}
+
 
 </style>
 </head>
@@ -151,6 +162,13 @@
     <h2>Năm học vào thư viện theo ngành</h2>
     <div class="trend-sub" id="studyYearSub">Phân bố lượt vào của sinh viên theo năm học và ngành</div>
     <div class="study-chart-box"><canvas id="studyYearChart"></canvas></div>
+  </div>
+
+
+  <div class="graduate-list-card">
+    <h2>Độc giả đã ra trường còn dùng thẻ</h2>
+    <div class="graduate-list-sub" id="graduateListSub">Danh sách trong tháng gần nhất</div>
+    <div id="graduateListContainer"></div>
   </div>
 
   <div class="note-box" id="noteBox"></div>
@@ -267,6 +285,21 @@ const MAJOR_MAP = {
   DINHDUONG: 'Dinh Dưỡng'
 };
 
+const MAJOR_MAX_STUDY_YEARS = {
+  Y: 6,
+  YHCT: 6,
+  RHM: 6,
+  D: 5,
+  DUOC: 5,
+  YHDP: 4,
+  YTCC: 4,
+  XNYH: 4,
+  HAYH: 4,
+  DD: 4,
+  HS: 4,
+  DINHDUONG: 4
+};
+
 const ANALYTICS_COLORS = [
   '#5B5FEF', '#0EA5A5', '#E29A3C', '#22B573',
   '#8B5CF6', '#EC4899', '#3B82F6', '#64748B'
@@ -364,15 +397,37 @@ function extractStartYear(value){
   return null;
 }
 
-function calculateStudyYear(startYear){
-  if(!startYear) return null;
+function calculateStudyYear(startYear, majorCode){
+  if(!startYear) return {
+    studyYear: null,
+    maxStudyYears: null,
+    studyStatus: 'Chưa xác định'
+  };
 
-  // Theo công thức đã chốt:
-  // Năm hiện tại - năm bắt đầu khóa học (User Text 1) + 1
-  const studyYear = new Date().getFullYear() - startYear + 1;
+  const rawStudyYear = new Date().getFullYear() - startYear + 1;
+  const maxStudyYears = MAJOR_MAX_STUDY_YEARS[majorCode] || 4;
 
-  // Chặn dữ liệu bất thường để không làm sai biểu đồ.
-  return studyYear >= 1 && studyYear <= 12 ? studyYear : null;
+  if(rawStudyYear < 1){
+    return {
+      studyYear: null,
+      maxStudyYears,
+      studyStatus: 'Chưa xác định'
+    };
+  }
+
+  if(rawStudyYear > maxStudyYears){
+    return {
+      studyYear: null,
+      maxStudyYears,
+      studyStatus: 'Đã ra trường / còn dùng thẻ'
+    };
+  }
+
+  return {
+    studyYear: rawStudyYear,
+    maxStudyYears,
+    studyStatus: `Năm ${rawStudyYear}`
+  };
 }
 
 async function loadReaderAnalyticsDirectory(){
@@ -391,6 +446,12 @@ async function loadReaderAnalyticsDirectory(){
     h.includes('ma doc gia') ||
     h.includes('ma doc')
   );
+
+  const idxTen = header.findIndex(h =>
+    h.includes('ho ten') ||
+    h.includes('ten')
+  );
+
 
   const idxBorrowerCategory = header.findIndex(h =>
     h.includes('borrower loan category')
@@ -422,14 +483,19 @@ async function loadReaderAnalyticsDirectory(){
     const userText1Raw = idxUserText1 > -1 ? row[idxUserText1] : '';
 
     const startYear = extractStartYear(userText1Raw);
+    const majorCode = extractMajorCode(addressRaw);
+    const studyInfo = calculateStudyYear(startYear, majorCode);
 
     map[ma] = {
+      hoTen: idxTen > -1 ? row[idxTen] : '',
       borrowerCategory: classifyBorrowerCategory(borrowerRaw),
       address: addressRaw,
-      majorCode: extractMajorCode(addressRaw),
+      majorCode,
       major: detectMajor(addressRaw),
       startYear,
-      studyYear: calculateStudyYear(startYear)
+      studyYear: studyInfo.studyYear,
+      maxStudyYears: studyInfo.maxStudyYears,
+      studyStatus: studyInfo.studyStatus
     };
   }
 
@@ -446,13 +512,81 @@ function countBy(items, keyFn){
   return out;
 }
 
+
+function renderGraduateList(enriched, latestMonth){
+  const graduateRows = enriched.filter(r =>
+    r.analytics.studyStatus === 'Đã ra trường / còn dùng thẻ'
+  );
+
+  const byReader = {};
+
+  graduateRows.forEach(r => {
+    const ma = r.ma;
+    if(!byReader[ma]){
+      byReader[ma] = {
+        ma,
+        hoTen: r.analytics.hoTen || '',
+        major: r.analytics.major || 'Khác/Chưa phân loại',
+        startYear: r.analytics.startYear || '',
+        count: 0
+      };
+    }
+    byReader[ma].count++;
+  });
+
+  const list = Object.values(byReader)
+    .sort((a,b) => b.count - a.count || a.ma.localeCompare(b.ma));
+
+  document.getElementById('graduateListSub').textContent =
+    `${list.length.toLocaleString('vi-VN')} độc giả • ${graduateRows.length.toLocaleString('vi-VN')} lượt vào — ${monthLabelOf(latestMonth)}`;
+
+  const container = document.getElementById('graduateListContainer');
+
+  if(!list.length){
+    container.innerHTML = '<div class="graduate-empty">Không có độc giả thuộc nhóm đã ra trường còn dùng thẻ trong tháng này.</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="graduate-table-wrap">
+      <table class="graduate-table">
+        <thead>
+          <tr>
+            <th>STT</th>
+            <th>Mã độc giả</th>
+            <th>Họ tên</th>
+            <th>Ngành</th>
+            <th>Năm bắt đầu khóa</th>
+            <th>Số lượt vào</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map((item, idx) => `
+            <tr>
+              <td class="mono">${idx + 1}</td>
+              <td class="mono">${item.ma}</td>
+              <td>${item.hoTen || '—'}</td>
+              <td>${item.major}</td>
+              <td class="mono">${item.startYear || '—'}</td>
+              <td class="mono">${item.count.toLocaleString('vi-VN')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth){
   const enriched = latestRows.map(row => ({
     ...row,
     analytics: analyticsDirectory[row.ma] || {
+      hoTen: '',
       borrowerCategory: 'Khác/Chưa phân loại',
       major: 'Khác/Chưa phân loại',
-      studyYear: null
+      startYear: null,
+      studyYear: null,
+      studyStatus: 'Chưa xác định'
     }
   }));
 
@@ -527,39 +661,71 @@ function renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth){
   // 3. NĂM HỌC × NGÀNH
   // ------------------------------------------------------------
   const studyRows = studentRows.filter(r =>
-    Number.isInteger(r.analytics.studyYear) &&
-    r.analytics.major !== 'Khác/Chưa phân loại'
+    r.analytics.major !== 'Khác/Chưa phân loại' &&
+    (
+      Number.isInteger(r.analytics.studyYear) ||
+      r.analytics.studyStatus === 'Đã ra trường / còn dùng thẻ'
+    )
   );
 
   const studyYears = Array.from(
-    new Set(studyRows.map(r => r.analytics.studyYear))
+    new Set(
+      studyRows
+        .filter(r => Number.isInteger(r.analytics.studyYear))
+        .map(r => r.analytics.studyYear)
+    )
   ).sort((a,b) => a - b);
+
+  const hasGraduatedUsers = studyRows.some(
+    r => r.analytics.studyStatus === 'Đã ra trường / còn dùng thẻ'
+  );
+
+  const studyLabels = studyYears.map(y => `Năm ${y}`);
+  if(hasGraduatedUsers){
+    studyLabels.push('Đã ra trường / còn dùng thẻ');
+  }
 
   const majors = Array.from(
     new Set(studyRows.map(r => r.analytics.major))
   );
 
   const totalsByYear = {};
-  studyRows.forEach(r => {
-    const y = r.analytics.studyYear;
-    totalsByYear[y] = (totalsByYear[y] || 0) + 1;
-  });
+  studyRows
+    .filter(r => Number.isInteger(r.analytics.studyYear))
+    .forEach(r => {
+      const y = r.analytics.studyYear;
+      totalsByYear[y] = (totalsByYear[y] || 0) + 1;
+    });
 
   const topStudyYear = Object.entries(totalsByYear)
     .sort((a,b) => b[1] - a[1])[0];
 
+  const graduatedCount = studyRows.filter(
+    r => r.analytics.studyStatus === 'Đã ra trường / còn dùng thẻ'
+  ).length;
+
   document.getElementById('studyYearSub').textContent = topStudyYear
-    ? `Năm ${topStudyYear[0]} có lượt vào cao nhất: ${Number(topStudyYear[1]).toLocaleString('vi-VN')} lượt — ${monthLabelOf(latestMonth)}`
+    ? `Năm ${topStudyYear[0]} có lượt vào cao nhất: ${Number(topStudyYear[1]).toLocaleString('vi-VN')} lượt`
+      + (graduatedCount ? ` • Đã ra trường/còn dùng thẻ: ${graduatedCount.toLocaleString('vi-VN')} lượt` : '')
+      + ` — ${monthLabelOf(latestMonth)}`
     : `Chưa đủ dữ liệu User Text 1 để tính năm học — ${monthLabelOf(latestMonth)}`;
 
   const studyDatasets = majors.map((major, i) => ({
     label: major,
-    data: studyYears.map(year =>
-      studyRows.filter(r =>
-        r.analytics.studyYear === year &&
-        r.analytics.major === major
-      ).length
-    ),
+    data: [
+      ...studyYears.map(year =>
+        studyRows.filter(r =>
+          r.analytics.studyYear === year &&
+          r.analytics.major === major
+        ).length
+      ),
+      ...(hasGraduatedUsers ? [
+        studyRows.filter(r =>
+          r.analytics.studyStatus === 'Đã ra trường / còn dùng thẻ' &&
+          r.analytics.major === major
+        ).length
+      ] : [])
+    ],
     backgroundColor: ANALYTICS_COLORS[i % ANALYTICS_COLORS.length],
     borderWidth: 0
   }));
@@ -567,7 +733,7 @@ function renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth){
   new Chart(document.getElementById('studyYearChart'), {
     type: 'bar',
     data: {
-      labels: studyYears.map(y => `Năm ${y}`),
+      labels: studyLabels,
       datasets: studyDatasets
     },
     options: {
@@ -595,6 +761,8 @@ function renderReaderAnalytics(latestRows, analyticsDirectory, latestMonth){
       }
     }
   });
+
+  renderGraduateList(enriched, latestMonth);
 }
 
 async function main(){
